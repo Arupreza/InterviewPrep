@@ -142,3 +142,87 @@ This is the **QLoRA recipe** (Dettmers et al., 2023):
 - Combined: minimal quality loss, maximum memory efficiency
 
 Standard for fine-tuning large models on consumer/mid-tier GPUs.
+
+# BitsAndBytes: Compute Dtype & Double Quantization
+
+## Code
+
+```python
+bnb_4bit_compute_dtype=torch.bfloat16 if is_bf16_supported() else torch.float16
+bnb_4bit_use_double_quant=True
+```
+
+---
+
+## `bnb_4bit_compute_dtype=torch.bfloat16`
+
+### What It Does
+
+Weights are stored as **4-bit**, but during multiplication they are temporarily converted to **bf16** for computation. After the matmul finishes, the bf16 copy is deleted.
+
+### Why
+
+- **4-bit storage:** Saves memory (3.5 GB instead of 14 GB for 7B model)
+- **bf16 compute:** Math is accurate during matmul
+- **Delete after:** Don't waste VRAM keeping the dequantized copy
+
+### Simple Flow
+
+```
+Storage: 4-bit weights
+    ↓
+Matmul starts: Dequantize to bf16 (temporary)
+    ↓
+Compute: Matmul in bf16 (accurate)
+    ↓
+Output: bf16 result flows forward
+    ↓
+Cleanup: Dequantized weights deleted
+```
+
+### Fallback
+
+If GPU is old (pre-Ampere, no bf16 support), use `torch.float16` instead. Less efficient but works.
+
+---
+
+## `bnb_4bit_use_double_quant=True`
+
+### What It Does
+
+The scale factors that convert 4-bit weights back to real numbers are also quantized (8-bit instead of 32-bit).
+
+### Why
+
+NF4 needs scale factors. Storing them in 32-bit wastes memory. **Double quant:** quantize the scales themselves to 8-bit.
+
+### Simple Breakdown
+
+```
+Without double quant:
+  - Weights: 4-bit
+  - Scale factors: 32-bit ← overhead, nearly as big as weights
+
+With double quant:
+  - Weights: 4-bit
+  - Scale factors: 8-bit ← much smaller
+  - Meta-scale: 32-bit (one per layer, negligible)
+```
+
+### Memory Saved
+
+Saves ~**0.37 bits per weight** with **zero accuracy loss**. Free memory reduction.
+
+---
+
+## Why Together
+
+**Storage ≠ Compute + Double Quant = QLoRA Standard**
+
+This combination (NF4 + double quant + bf16 compute) is the recommended setup from the QLoRA paper. It gives you:
+
+- Maximum memory compression (weights in 4-bit)
+- Minimal overhead (scales in 8-bit)
+- Good accuracy (compute in bf16)
+
+Used in all modern QLoRA fine-tuning.
