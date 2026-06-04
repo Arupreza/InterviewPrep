@@ -60,3 +60,51 @@ Formula:
 $$
 \text{LoRA params per layer} = r \times (d_{in} + d_{out})
 $$
+
+
+# BitsAndBytes 4-bit Configuration
+
+## What It Does
+
+Compresses model weights to 4-bit integers during loading, reducing GPU memory by ~4× while keeping activations and gradients in higher precision. Only the frozen weights are quantized; training gradients flow through dequantized activations.
+
+---
+
+## Parameters Breakdown
+
+### `load_in_4bit=True`
+Enables 4-bit quantization. Replaces all `nn.Linear` with `bnb.nn.Linear4bit`. Weights are stored as packed 4-bit integers (2 weights per byte) + per-block scaling factors.
+
+### `bnb_4bit_quant_type="nf4"`
+**NormalFloat-4 (NF4).** The 16 representable values are placed at the quantiles of a standard normal distribution. Optimal for LLM weights (approximately N(0, σ²)). Minimizes quantization error.
+
+**Alternative:** `"fp4"` (standard 4-bit float) — less accurate for LLMs, rarely used.
+
+### `bnb_4bit_compute_dtype=torch.bfloat16`
+**Storage ≠ Compute.** Weights stay in 4-bit storage. During matrix multiplication, bnb **dequantizes on-the-fly to bf16**, performs the matmul, then discards the dequantized copy. If hardware lacks bf16 (older GPUs), falls back to `torch.float16`.
+
+### `bnb_4bit_use_double_quant=True`
+**Quantize the quantization constants.** NF4 uses per-block scale factors (fp32). Double quant quantizes these scales to 8-bit with a second-level scale. Saves ~0.37 bits/weight with no accuracy loss. Standard in QLoRA.
+
+---
+
+## Memory Impact
+
+For a 7B model in fp16:
+- **fp16:** ~14 GB
+- **4-bit + double quant:** ~3.5 GB (~4× reduction)
+
+With LoRA adapters on top, gradients/optimizer state still consume memory but weights dominate → massive savings.
+
+---
+
+## Why This Config
+
+This is the **QLoRA recipe** (Dettmers et al., 2023):
+
+- NF4 is theoretically optimal for weights
+- Double quant is free memory savings
+- bf16 compute matches training precision
+- Combined: minimal quality loss, maximum memory efficiency
+
+Standard for fine-tuning large models on consumer/mid-tier GPUs.
