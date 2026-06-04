@@ -1,5 +1,27 @@
 # LoRA Rank — Study Note
 
+## Code
+
+```python
+MAX_SEQ_LEN = 2048
+LORA_RANK   = 32
+
+lora_config = LoraConfig(
+    r=LORA_RANK,
+    lora_alpha=LORA_RANK,
+    target_modules=[
+        "q_proj","k_proj","v_proj","o_proj",
+        "gate_proj","up_proj","down_proj",
+    ],
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM",
+)
+model = get_peft_model(model, lora_config)
+```
+
+---
+
 ## Definition
 
 LoRA rank (`r`) is the **inner bottleneck dimension** of the low-rank decomposition used to approximate the weight update during fine-tuning. Instead of learning a full update matrix `ΔW ∈ ℝ^(d_out × d_in)`, LoRA factorizes it as the product of two smaller matrices:
@@ -61,8 +83,20 @@ $$
 \text{LoRA params per layer} = r \times (d_{in} + d_{out})
 $$
 
-
 # BitsAndBytes 4-bit Configuration
+
+## Code
+
+```python
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.bfloat16 if is_bf16_supported() else torch.float16,
+    bnb_4bit_use_double_quant=True,
+)
+```
+
+---
 
 ## What It Does
 
