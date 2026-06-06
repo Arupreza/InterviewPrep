@@ -227,7 +227,7 @@ This combination (NF4 + double quant + bf16 compute) is the recommended setup fr
 
 Used in all modern QLoRA fine-tuning.
 
-## Tokenizer Setup
+# Tokenizer Setup
 
 ```python
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
@@ -310,6 +310,37 @@ model = get_peft_model(model, lora_config)
 | `lora_dropout=0.05` | Regularization on LoRA path. Typical: 0.05–0.1. |
 | `bias="none"` | Don't train biases. Saves memory; biases rarely matter. |
 | `task_type="CAUSAL_LM"` | Tells PEFT this is a decoder LM. Sets up correct loss/head wiring. |
+
+## Visualizing the dimensions
+
+```
+W (frozen)              B               A
+                        ┌─┐         
+┌────────────┐          │ │             ┌──────────────┐
+│            │          │ │             │              │
+│ 5120×5120  │   +      │ │ 5120×r      │   r×5120     │  =  same shape as W
+│            │          │ │             │              │     (5120 × 5120)
+│            │          │ │             └──────────────┘
+└────────────┘          └─┘
+   26M params       r=32:               r=32:
+   (frozen)         164K params         164K params
+
+                    Total LoRA: ~330K params (vs 26M)
+```
+
+## What `r` (rank) controls
+
+**Capacity of the update.** Higher `r` = the LoRA can represent a more complex change to `W`.
+
+| `r` value | Trainable params | Use case |
+|---|---|---|
+| 4 | Tiny | Style adjustments, prompt-following tweaks |
+| 8 | Small | Light instruction tuning |
+| 16 | Medium | Standard fine-tuning |
+| **32** | Standard | Domain adaptation, your GRPO case ✓ |
+| 64 | Large | Heavy domain shift, multi-task |
+| 128+ | Big | Approaches full fine-tuning capacity |
+| 256+ | Diminishing returns | Just do full fine-tuning |
 
 ## Why QLoRA works (this combo)
 
