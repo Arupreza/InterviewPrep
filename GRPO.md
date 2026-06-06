@@ -327,17 +327,6 @@ W (frozen)              B               A
 
                     Total LoRA: ~330K params (vs 26M)
 ```
-## The practical effect — same data, different ratios
-
-Imagine training on coding tasks. After 200 steps:
-
-| ratio | What you'd see |
-|---|---|
-| 0.1 | Model still answers like generic Qwen, very subtle coding-style nudges |
-| 0.5 | Some coding format adherence, but reasoning still feels generic |
-| **1.0** | Solid coding format + reasoning shift, base capabilities preserved |
-| 2.0 | Strong coding behavior, but might forget general chat skills |
-| 4.0 | Aggressive — outputs only code, possibly degraded quality |
 
 ## What `r` (rank) controls
 
@@ -352,6 +341,18 @@ Imagine training on coding tasks. After 200 steps:
 | 64 | Large | Heavy domain shift, multi-task |
 | 128+ | Big | Approaches full fine-tuning capacity |
 | 256+ | Diminishing returns | Just do full fine-tuning |
+
+## The practical effect — same data, different ratios
+
+Imagine training on coding tasks. After 200 steps:
+
+| ratio | What you'd see |
+|---|---|
+| 0.1 | Model still answers like generic Qwen, very subtle coding-style nudges |
+| 0.5 | Some coding format adherence, but reasoning still feels generic |
+| **1.0** | Solid coding format + reasoning shift, base capabilities preserved |
+| 2.0 | Strong coding behavior, but might forget general chat skills |
+| 4.0 | Aggressive — outputs only code, possibly degraded quality |
 
 ## Why QLoRA works (this combo)
 
