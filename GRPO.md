@@ -115,7 +115,7 @@ Enables 4-bit quantization. Replaces all `nn.Linear` with `bnb.nn.Linear4bit`. W
 **Alternative:** `"fp4"` (standard 4-bit float) — less accurate for LLMs, rarely used.
 
 ### `bnb_4bit_compute_dtype=torch.bfloat16`
-**Storage ≠ Compute.** Weights stay in 4-bit storage. During matrix multiplication, bnb **dequantizes on-the-fly to bf16**, performs the matmul, then discards the dequantized copy. If hardware lacks bf16 (older GPUs), falls back to `torch.float16`.
+**Storage ≠ Compute.** Weights stay in 4-bit storage. During matrix multiplication, bnb **dequantizes on-the-fly to bf16**, performs the matmul, then discards the dequantized copy. If hardware lacks bf16 (older GPUs), falls back to `torch.float16`. BF16 keeps FP32's range but sacrifices precision. FP16 keeps more precision but has a small range.
 
 ### `bnb_4bit_use_double_quant=True`
 **Quantize the quantization constants.** NF4 uses per-block scale factors (fp32). Double quant quantizes these scales to 8-bit with a second-level scale. Saves ~0.37 bits/weight with no accuracy loss. Standard in QLoRA.
@@ -226,3 +226,40 @@ This combination (NF4 + double quant + bf16 compute) is the recommended setup fr
 - Good accuracy (compute in bf16)
 
 Used in all modern QLoRA fine-tuning.
+
+## Tokenizer Setup
+
+```python
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+tokenizer.pad_token = tokenizer.eos_token
+tokenizer.padding_side = "left"
+```
+
+## Why each line
+
+**`from_pretrained(MODEL_PATH)`** — load tokenizer from same path as model. Vocab mismatch = silent corruption.
+
+**`pad_token = eos_token`** — Qwen/LLaMA/Mistral ship without a pad token. Reusing EOS is safe because `attention_mask` zeros out padded positions during training. Skip this → `DataCollator` crashes.
+
+| Before padding              | After padding                  |
+| --------------------------- | ------------------------------ |
+| `[12, 45, 89]`              | `[12, 45, 89, PAD, PAD]`       |
+| `[12, 78, 23, 56, 91]`      | `[12, 78, 23, 56, 91]`         |
+| `[34, 22]`                  | `[34, 22, PAD, PAD, PAD]`      |
+
+
+**`padding_side = "left"`** — decoder LLMs generate to the right. Right-padding makes the model continue from `[PAD]` → garbage. Left-padding keeps the last real token at the generation position. Required for GRPO (generates during training).
+
+## Verify
+
+```python
+print(tokenizer.pad_token_id, tokenizer.eos_token_id)  # should match
+print(tokenizer.padding_side)                          # 'left'
+print(len(tokenizer))                                  # must equal model embedding size
+```
+
+## Gotchas
+
+- Set pad_token **before** tokenizing, not after.
+- Encoder models (BERT) → use `padding_side="right"`.
+- Save with `tokenizer.save_pretrained(OUT)` or changes are lost.
