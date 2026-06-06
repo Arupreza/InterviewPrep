@@ -263,3 +263,70 @@ print(len(tokenizer))                                  # must equal model embedd
 - Set pad_token **before** tokenizing, not after.
 - Encoder models (BERT) → use `padding_side="right"`.
 - Save with `tokenizer.save_pretrained(OUT)` or changes are lost.
+
+# Model Loading + LoRA Setup
+
+```python
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_PATH,
+    quantization_config=bnb_config,
+    device_map="auto",
+    attn_implementation="flash_attention_2",
+    torch_dtype=torch.bfloat16 if is_bf16_supported() else torch.float16,
+)
+model.config.use_cache = False
+```
+
+## Model load — argument by argument
+
+| Argument | What it does |
+|---|---|
+| `quantization_config=bnb_config` | Load weights in 4-bit NF4 via bitsandbytes. 32B model → ~18 GB instead of ~64 GB. |
+| `device_map="auto"` | Auto-place layers on available GPU(s). Spills to CPU/disk only if it must. |
+| `attn_implementation="flash_attention_2"` | Use FA2 kernel — O(N) memory instead of O(N²). Required for long sequences on a single GPU. |
+| `torch_dtype=bfloat16` | Non-quantized layers (norms, embeddings, compute) run in BF16. Falls back to FP16 on pre-Ampere GPUs. |
+| `model.config.use_cache = False` | Disable KV cache. Required for gradient checkpointing during training; saves VRAM. Re-enable for inference. |
+
+## LoRA setup
+
+```python
+lora_config = LoraConfig(
+    r=LORA_RANK,
+    lora_alpha=LORA_RANK,
+    target_modules=["q_proj","k_proj","v_proj","o_proj",
+                    "gate_proj","up_proj","down_proj"],
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM",
+)
+model = get_peft_model(model, lora_config)
+```
+
+| Field | Purpose |
+|---|---|
+| `r=32` | LoRA rank. Lower = fewer trainable params, less capacity. Common: 8/16/32/64. |
+| `lora_alpha=r` | Scaling factor. `alpha/r` is the effective LoRA strength. `alpha = r` → scale of 1.0 (standard). |
+| `target_modules` | Which linear layers get LoRA adapters. All 4 attention projections + all 3 MLP projections = full coverage. |
+| `lora_dropout=0.05` | Regularization on LoRA path. Typical: 0.05–0.1. |
+| `bias="none"` | Don't train biases. Saves memory; biases rarely matter. |
+| `task_type="CAUSAL_LM"` | Tells PEFT this is a decoder LM. Sets up correct loss/head wiring. |
+
+## Why QLoRA works (this combo)
+
+| Component | Memory contribution |
+|---|---|
+| Base weights in NF4 | ~18 GB (frozen, not trained) |
+| LoRA adapters in BF16 | ~150 MB (only these get gradients) |
+| FA2 attention | activations ~10 GB instead of ~100 GB |
+| `use_cache=False` + grad checkpointing | activations stored only at checkpoints |
+
+→ 32B training fits on a single 47 GB A6000.
+
+## Trainable parameters check
+
+`model.print_trainable_parameters()` outputs:
+```
+trainable params: 67,108,864 || all params: 32,830,996,480 || trainable%: 0.2044
+```
+
+Only ~67M of 32B params get gradients. That's the entire point of LoRA — full fine-tuning of 32B would need >300 GB VRAM.
